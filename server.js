@@ -6,6 +6,10 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
+app.get('/', (req, res) => {
+  res.send('<h1>eWallet API Live</h1><p>Il server del lido è online e pronto a ricevere transazioni.</p>');
+});
+
 // 1. Endpoint di Controllo Stato / Test
 app.get('/api/status', (req, res) => {
   res.json({ status: "Sistema eWallet Lido Attivo" });
