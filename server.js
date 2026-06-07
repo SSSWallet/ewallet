@@ -5,6 +5,7 @@ const db = require('./db');
 const app = express();
 app.use(cors());
 app.use(express.json());
+app.use(express.static('public'));
 
 app.get('/', (req, res) => {
   res.send('<h1>eWallet API Live</h1><p>Il server del lido è online e pronto a ricevere transazioni.</p>');
