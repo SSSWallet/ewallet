@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>eWallet Cassa - Gestione Lido</title>
+    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+</head>
+<body class="bg-slate-100 font-sans min-h-screen">
+
+    <nav class="bg-blue-600 text-white p-4 shadow-md mb-8">
+        <div class="max-w-6xl mx-auto flex justify-between items-center">
+            <h1 class="text-xl font-bold tracking-wide">🏖️ LIDO EWALLET — CASSA CENTRALE</h1>
+            <span class="bg-blue-700 px-3 py-1 rounded text-sm font-semibold">Terminale Attivo</span>
+        </div>
+    </nav>
+
+    <main class="max-w-6xl mx-auto px-4 grid grid-cols-1 md:grid-cols-2 gap-8">
+        
+        <section class="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
+            <h2 class="text-xl font-bold text-slate-800 mb-4 pb-2 border-b border-slate-100 text-blue-600">🆕 Registra Nuovo Braccialetto</h2>
+            <form id="registerForm" class="space-y-4">
+                <div>
+                    <label class="block text-sm font-medium text-slate-600 mb-1">UID Braccialetto (NFC)</label>
+                    <input type="text" id="regUid" required placeholder="Passa il braccialetto sul lettore o digita l'UID" class="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:outline-none">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-slate-600 mb-1">Nome Cliente / Ombrellone</label>
+                    <input type="text" id="regName" placeholder="Es. Mario Rossi o Ombrellone 45" class="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:outline-none">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-slate-600 mb-1">Carico Denaro Iniziale (€)</label>
+                    <input type="number" id="regBalance" min="0" step="0.01" value="0.00" class="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:outline-none">
+                </div>
+                <button type="submit" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-medium p-3 rounded-lg transition-colors cursor-pointer shadow-sm">
+                    Inizializza ed Associa Braccialetto
+                </button>
+            </form>
+        </section>
+
+        <section class="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
+            <h2 class="text-xl font-bold text-slate-800 mb-4 pb-2 border-b border-slate-100 text-emerald-600">💰 Ricarica Credito Braccialetto</h2>
+            <form id="topupForm" class="space-y-4">
+                <div>
+                    <label class="block text-sm font-medium text-slate-600 mb-1">UID Braccialetto (NFC)</label>
+                    <input type="text" id="topupUid" required placeholder="Passa il braccialetto sul lettore per ricaricare" class="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:outline-none">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-slate-600 mb-1">Importo da Aggiungere (€)</label>
+                    <input type="number" id="topupAmount" required min="0.01" step="0.01" placeholder="0.00" class="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:outline-none">
+                </div>
+                <button type="submit" class="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-medium p-3 rounded-lg transition-colors cursor-pointer shadow-sm">
+                    Conferma Ricarica Cassa
+                </button>
+            </form>
+        </section>
+
+    </main>
+
+    <div id="toast" class="hidden fixed bottom-5 right-5 text-white px-6 py-3 rounded-xl shadow-lg font-medium transition-all transform translate-y-10"></div>
+
+    <script>
+        // Sostituisci questo indirizzo con il tuo URL reale di Render
+        // Es: const API_URL = 'https://ewallet-lido.onrender.com/api';
+        const API_URL = 'https://ewallet-backend-1xin.onrender.com/';
+
+        // Funzione di utilità per mostrare notifiche a schermo
+        function showToast(message, isSuccess = true) {
+            const toast = document.getElementById('toast');
+            toast.textContent = message;
+            toast.className = `fixed bottom-5 right-5 text-white px-6 py-3 rounded-xl shadow-lg font-medium transition-all ${isSuccess ? 'bg-emerald-600' : 'bg-rose-600'}`;
+            toast.classList.remove('hidden');
+            setTimeout(() => toast.classList.add('hidden'), 4000);
+        }
+
+        // GESTIONE REGISTRAZIONE
+        document.getElementById('registerForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const payload = {
+                uid: document.getElementById('regUid').value.trim(),
+                name: document.getElementById('regName').value.trim(),
+                initial_balance: document.getElementById('regBalance').value
+            };
+
+            try {
+                const response = await fetch(`${API_URL}/register-tag`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                const data = await response.json();
+                
+                if (data.success) {
+                    showToast(`Braccialetto registrato! ID Cliente: ${data.customer_id}`);
+                    document.getElementById('registerForm').reset();
+                } else {
+                    showToast(`Errore: ${data.error}`, false);
+                }
+            } catch (err) {
+                showToast("Errore di connessione al server cloud", false);
+            }
+        });
+
+        // GESTIONE RICARICA
+        document.getElementById('topupForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const payload = {
+                uid: document.getElementById('topupUid').value.trim(),
+                amount: document.getElementById('topupAmount').value
+            };
+
+            try {
+                const response = await fetch(`${API_URL}/topup`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                const data = await response.json();
+
+                if (data.success) {
+                    showToast(`Ricarica effettuata! Nuovo Saldo: €${data.new_balance}`);
+                    document.getElementById('topupForm').reset();
+                } else {
+                    showToast(`Errore: ${data.error}`, false);
+                }
+            } catch (err) {
+                showToast("Errore di connessione al server cloud", false);
+            }
+        });
+    </script>
+</body>
+</html>
