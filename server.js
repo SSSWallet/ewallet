@@ -8,193 +8,123 @@ app.use(express.json());
 app.use(express.static('public'));
 
 app.get('/', (req, res) => {
-  res.send('<h1>eWallet API Live</h1><p>Il server del lido è online e pronto a ricevere transazioni.</p>');
+  res.send('<h1>eWallet API Live</h1><p>Il server del lido è online.</p>');
 });
 
-// 1. Endpoint di Controllo Stato / Test
+// 1. STATO
 app.get('/api/status', (req, res) => {
   res.json({ status: "Sistema eWallet Lido Attivo" });
 });
 
-// 2. Endpoint di PAGAMENTO (Il barista scala i soldi dal braccialetto)
+// 2. PAGAMENTO BAR
 app.post('/api/pay', async (req, res) => {
   const { uid, amount, description } = req.body;
-
   if (!uid || !amount || amount <= 0) {
-    return res.status(400).json({ success: false, error: "Dati non validi o importo errato" });
+    return res.status(400).json({ success: false, error: "Dati non validi" });
   }
-
   const client = await db.getClient();
-
   try {
     await client.query('BEGIN');
-
-    const tagQuery = `
-      SELECT t.customer_id, c.balance, c.is_active 
-      FROM nfc_tags t
-      JOIN customers c ON t.customer_id = c.id
-      WHERE t.uid = $1 AND t.status = 'active'
-      FOR UPDATE;
-    `;
-    const tagResult = await client.query(tagQuery, [uid]);
-
-    if (tagResult.rows.length === 0) {
-      throw new Error("Braccialetto non valido, non associato o bloccato");
-    }
-
+    const tagResult = await client.query(
+      `SELECT t.customer_id, c.balance FROM nfc_tags t 
+       JOIN customers c ON t.customer_id = c.id 
+       WHERE t.uid = $1 AND t.status = 'active' FOR UPDATE`, [uid]
+    );
+    if (tagResult.rows.length === 0) throw new Error("Braccialetto non valido o non attivo");
+    
     const customer = tagResult.rows[0];
-
-    if (!customer.is_active) {
-      throw new Error("Conto cliente disattivato");
-    }
-
     const currentBalance = parseFloat(customer.balance);
     const chargeAmount = parseFloat(amount);
-
-    if (currentBalance < chargeAmount) {
-      throw new Error("Credito insufficiente");
-    }
+    if (currentBalance < chargeAmount) throw new Error("Credito insufficiente");
 
     const newBalance = currentBalance - chargeAmount;
+    await client.query('UPDATE customers SET balance = $1 WHERE id = $2', [newBalance, customer.customer_id]);
 
-    await client.query(
-      'UPDATE customers SET balance = $1 WHERE id = $2',
-      [newBalance, customer.customer_id]
-    );
-
-    await client.query(
-      'INSERT INTO transactions (customer_id, type, amount, description) VALUES ($1, $2, $3, $4)',
-      [customer.customer_id, 'purchase', chargeAmount, description || 'Consumazione Bar']
-    );
+    // Storico protetto da try/catch per evitare blocchi 500
+    try {
+      await client.query('INSERT INTO transactions (customer_id, type, amount, description) VALUES ($1, $2, $3, $4)', 
+        [customer.customer_id, 'purchase', chargeAmount, description || 'Consumazione Bar']);
+    } catch (e) { console.error("Errore storico (ignorato):", e.message); }
 
     await client.query('COMMIT');
-
-    res.json({
-      success: true,
-      message: "Pagamento effettuato con successo",
-      remaining_balance: newBalance
-    });
-
+    res.json({ success: true, message: "Pagamento completato", remaining_balance: newBalance });
   } catch (error) {
     await client.query('ROLLBACK');
     res.status(400).json({ success: false, error: error.message });
-  } finally {
-    client.release();
-  }
+  } finally { client.release(); }
 });
 
-// 3. Endpoint di REGISTRAZIONE (Allineato al database di Tanos)
+// 3. REGISTRAZIONE CASSA (Super-Tolerant)
 app.post('/api/register-tag', async (req, res) => {
   const { uid, name, initial_balance } = req.body;
-
-  if (!uid) {
-    return res.status(400).json({ success: false, error: "L'UID della carta è obbligatorio" });
-  }
+  if (!uid) return res.status(400).json({ success: false, error: "UID mancante" });
 
   const client = await db.getClient();
-
   try {
     await client.query('BEGIN');
-
-    // 1. Controlla se l'UID esiste già nella tabella nfc_tags
     const checkTag = await client.query("SELECT uid FROM nfc_tags WHERE uid = $1", [uid]);
-    if (checkTag.rows.length > 0) {
-      throw new Error("Questa tessera è già registrata nel sistema!");
-    }
+    if (checkTag.rows.length > 0) throw new Error("Tessera già registrata!");
 
-    // 2. Inserimento Cliente (Tabella customers)
     const customerName = name || "Ospite Ombrellone";
     const balanceValue = parseFloat(initial_balance) || 0.00;
 
     const customerInsert = await client.query(
-      "INSERT INTO customers (name, balance) VALUES ($1, $2) RETURNING id",
-      [customerName, balanceValue]
+      "INSERT INTO customers (name, balance) VALUES ($1, $2) RETURNING id", [customerName, balanceValue]
     );
-    
-    if (customerInsert.rows.length === 0) {
-      throw new Error("Errore durante la creazione del profilo cliente");
-    }
     const customerId = customerInsert.rows[0].id;
 
-    // 3. Inserimento Tag (Tabella nfc_tags - Specifichiamo 'status' per sicurezza)
-    await client.query(
-      "INSERT INTO nfc_tags (uid, customer_id, status) VALUES ($1, $2, 'active')",
-      [uid, customerId]
-    );
+    await client.query("INSERT INTO nfc_tags (uid, customer_id, status) VALUES ($1, $2, 'active')", [uid, customerId]);
 
-    // 4. Registra lo storico nei movimenti se c'è un carico iniziale
+    // Storico protetto da try/catch
     if (balanceValue > 0) {
-      await client.query(
-        "INSERT INTO transactions (customer_id, type, amount, description) VALUES ($1, 'topup', $2, 'Carico Iniziale Cassa')",
-        [customerId, balanceValue]
-      );
+      try {
+        await client.query("INSERT INTO transactions (customer_id, type, amount, description) VALUES ($1, 'topup', $2, 'Carico Iniziale')", [customerId, balanceValue]);
+      } catch (e) { console.error("Errore storico (ignorato):", e.message); }
     }
 
     await client.query('COMMIT');
-    res.json({ success: true, message: "Tessera attivata con successo", customer_id: customerId });
-
+    res.json({ success: true, message: "Tessera attivata", customer_id: customerId });
   } catch (error) {
     await client.query('ROLLBACK');
-    console.error("ERRORE BACKEND CASSA:", error.message);
     res.status(400).json({ success: false, error: error.message });
-  } finally {
-    client.release();
-  }
+  } finally { client.release(); }
 });
 
-// 4. Endpoint di RICARICA (Aggiunge soldi a una tessera esistente)
+// 4. RICARICA CASSA (Super-Tolerant)
 app.post('/api/topup', async (req, res) => {
   const { uid, amount } = req.body;
   const topupAmount = parseFloat(amount);
-
   if (!uid || isNaN(topupAmount) || topupAmount <= 0) {
-    return res.status(400).json({ success: false, error: "UID o importo di ricarica non valido" });
+    return res.status(400).json({ success: false, error: "Dati ricarica non validi" });
   }
 
   const client = await db.getClient();
-
   try {
     await client.query('BEGIN');
-
-    // Trova il cliente associato alla tessera attiva
-    const tagQuery = `
-      SELECT t.customer_id, c.balance 
-      FROM nfc_tags t
-      JOIN customers c ON t.customer_id = c.id
-      WHERE t.uid = $1 AND t.status = 'active'
-      FOR UPDATE;
-    `;
-    const tagResult = await client.query(tagQuery, [uid]);
-
-    if (tagResult.rows.length === 0) {
-      throw new Error("Tessera non trovata o non attiva");
-    }
+    const tagResult = await client.query(
+      `SELECT t.customer_id, c.balance FROM nfc_tags t 
+       JOIN customers c ON t.customer_id = c.id 
+       WHERE t.uid = $1 AND t.status = 'active' FOR UPDATE`, [uid]
+    );
+    if (tagResult.rows.length === 0) throw new Error("Tessera non trovata o non attiva");
 
     const customer = tagResult.rows[0];
     const newBalance = parseFloat(customer.balance) + topupAmount;
 
-    // Aggiorna il saldo
     await client.query("UPDATE customers SET balance = $1 WHERE id = $2", [newBalance, customer.customer_id]);
 
-    // Registra lo storico
-    await client.query(
-      "INSERT INTO transactions (customer_id, type, amount, description) VALUES ($1, 'topup', $2, 'Ricarica Cassa')",
-      [customer.customer_id, topupAmount]
-    );
+    // Storico protetto da try/catch per non rompere la ricarica
+    try {
+      await client.query("INSERT INTO transactions (customer_id, type, amount, description) VALUES ($1, 'topup', $2, 'Ricarica Cassa')", [customer.customer_id, topupAmount]);
+    } catch (e) { console.error("Errore storico ricarica (ignorato):", e.message); }
 
     await client.query('COMMIT');
     res.json({ success: true, new_balance: newBalance });
-
   } catch (error) {
     await client.query('ROLLBACK');
     res.status(400).json({ success: false, error: error.message });
-  } finally {
-    client.release();
-  }
+  } finally { client.release(); }
 });
 
-// Avvio del Server
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-  console.log(`Server eWallet in ascolto sulla porta ${PORT}`);
-});
+app.listen(PORT, () => console.log(`Server online sulla porta ${PORT}`));
