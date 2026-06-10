@@ -1,14 +1,19 @@
 const { Pool } = require('pg');
-require('dotenv').config();
 
+// Sostituiamo l'URL con i parametri singoli, che è un sistema molto più robusto
 const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
+  user: 'postgres',
+  host: 'aws-0-eu-central-1.pooler.supabase.com', // Forziamo l'IPv4 del Pooler
+  database: 'postgres',
+  password: 'Bracciano.2026', // <--- NOTA: Ho tolto le parentesi quadre! Metti la tua password esatta qui
+  port: 6543, // Porta del pooler
   ssl: {
-    rejectUnauthorized: false // Richiesto da Supabase per le connessioni sicure
-  }
+    rejectUnauthorized: false // Obbligatorio per far dialogare Render e Supabase
+  },
+  connectionTimeoutMillis: 10000 // Aspetta fino a 10 secondi prima di dare errore
 });
 
 module.exports = {
-  query: (text, params) => pool.query(text, params),
-  getClient: () => pool.connect() // Ci servirà per le transazioni sicure
+  getClient: () => pool.connect(),
+  query: (text, params) => pool.query(text, params)
 };
