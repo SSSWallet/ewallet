@@ -1,15 +1,11 @@
 const { Pool } = require('pg');
 
+// Usiamo l'URL di connessione IPv4 diretto fornito da Supabase per evitare i blocchi DNS di Render
+const connectionString = "postgresql://postgres:Bracciano.2026@db.rvsgbsnkurutsburxkwk.supabase.co:5432/postgres?sslmode=require";
+
 const pool = new Pool({
-  user: 'postgres',
-  host: '54.93.53.117', // <--- L'IP IPv4 diretto di Supabase (Francoforte / AWS)
-  database: 'postgres',
-  password: 'Bracciano.2026', 
-  port: 5432, 
-  ssl: {
-    rejectUnauthorized: false 
-  },
-  connectionTimeoutMillis: 15000 // Aumentiamo a 15 secondi per sicurezza
+  connectionString: connectionString,
+  connectionTimeoutMillis: 20000 // Alziamo a 20 secondi per dare tempo al database di svegliarsi
 });
 
 module.exports = {
