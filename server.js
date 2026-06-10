@@ -90,40 +90,70 @@ app.post('/api/register-tag', async (req, res) => {
   } finally { client.release(); }
 });
 
-// 4. RICARICA CASSA (Super-Tolerant)
+// 4. Endpoint di RICARICA (Versione Investigativa Separata)
 app.post('/api/topup', async (req, res) => {
   const { uid, amount } = req.body;
   const topupAmount = parseFloat(amount);
+
   if (!uid || isNaN(topupAmount) || topupAmount <= 0) {
     return res.status(400).json({ success: false, error: "Dati ricarica non validi" });
   }
 
   const client = await db.getClient();
+
   try {
     await client.query('BEGIN');
-    const tagResult = await client.query(
-      `SELECT t.customer_id, c.balance FROM nfc_tags t 
-       JOIN customers c ON t.customer_id = c.id 
-       WHERE t.uid = $1 AND t.status = 'active' FOR UPDATE`, [uid]
-    );
-    if (tagResult.rows.length === 0) throw new Error("Tessera non trovata o non attiva");
 
-    const customer = tagResult.rows[0];
-    const newBalance = parseFloat(customer.balance) + topupAmount;
+    // STEP 1: Cerca il tag NFC (senza fare JOIN)
+    console.log(`[TOPUP] Cerco il tag con UID: ${uid}`);
+    const tagResult = await client.query("SELECT customer_id FROM nfc_tags WHERE uid = $1", [uid]);
+    
+    if (tagResult.rows.length === 0) {
+      throw new Error(`Il braccialetto con UID ${uid} non è registrato nella tabella nfc_tags`);
+    }
 
-    await client.query("UPDATE customers SET balance = $1 WHERE id = $2", [newBalance, customer.customer_id]);
+    const customerId = tagResult.rows[0].customer_id;
+    if (!customerId) {
+      throw new Error(`Il braccialetto esiste ma non è associato a nessun ID cliente (customer_id è null)`);
+    }
 
-    // Storico protetto da try/catch per non rompere la ricarica
+    // STEP 2: Recupera il saldo del cliente dalla tabella customers
+    console.log(`[TOPUP] Tag trovato. ID Cliente associato: ${customerId}. Recupero il saldo...`);
+    
+    // NOTA: Se si pianta qui, la colonna 'balance' o la tabella 'customers' ha un nome diverso!
+    const customerResult = await client.query("SELECT balance FROM customers WHERE id = $1 FOR UPDATE", [customerId]);
+    
+    if (customerResult.rows.length === 0) {
+      throw new Error(`Cliente ID ${customerId} non trovato nella tabella customers`);
+    }
+
+    const currentBalance = parseFloat(customerResult.rows[0].balance) || 0;
+    const newBalance = currentBalance + topupAmount;
+
+    // STEP 3: Aggiorna il saldo
+    console.log(`[TOPUP] Saldo attuale: €${currentBalance}. Nuovo saldo calcolato: €${newBalance}. Aggiorno...`);
+    await client.query("UPDATE customers SET balance = $1 WHERE id = $2", [newBalance, customerId]);
+
+    // STEP 4: Tenta lo storico (protetto)
     try {
-      await client.query("INSERT INTO transactions (customer_id, type, amount, description) VALUES ($1, 'topup', $2, 'Ricarica Cassa')", [customer.customer_id, topupAmount]);
-    } catch (e) { console.error("Errore storico ricarica (ignorato):", e.message); }
+      await client.query("INSERT INTO transactions (customer_id, type, amount, description) VALUES ($1, 'topup', $2, 'Ricarica Cassa')", [customerId, topupAmount]);
+    } catch (e) {
+      console.error("[TOPUP WARNING] Errore inserimento transazione (ignorato):", e.message);
+    }
 
     await client.query('COMMIT');
+    console.log(`[TOPUP SUCCESS] Ricarica completata per cliente ${customerId}. Nuovo saldo: €${newBalance}`);
+    
     res.json({ success: true, new_balance: newBalance });
+
   } catch (error) {
     await client.query('ROLLBACK');
-    res.status(400).json({ success: false, error: error.message });
-  } finally { client.release(); }
+    console.error("[TOPUP CRITICAL ERROR]:", error.message);
+    // Ti restituiamo l'errore esatto di Postgres direttamente sul browser nel Toast!
+    res.status(500).json({ success: false, error: `Errore Database: ${error.message}` });
+  } finally {
+    client.release();
+  }
 });
 
 const PORT = process.env.PORT || 3000;
