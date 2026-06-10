@@ -1,16 +1,17 @@
 const { Pool } = require('pg');
 
-// Sostituiamo l'URL con i parametri singoli, che è un sistema molto più robusto
 const pool = new Pool({
-  user: 'postgres',
-  host: 'aws-0-eu-central-1.pooler.supabase.com', // Forziamo l'IPv4 del Pooler
+  user: 'postgres.rvsgbsnkurutsburxkwk', // 1. MODIFICA: Aggiungiamo l'ID progetto all'utente
+  host: 'aws-0-eu-central-1.pooler.supabase.com',
   database: 'postgres',
-  password: 'Bracciano.2026', // <--- NOTA: Ho tolto le parentesi quadre! Metti la tua password esatta qui
-  port: 6543, // Porta del pooler
+  password: 'Bracciano.2026', 
+  port: 6543, 
   ssl: {
-    rejectUnauthorized: false // Obbligatorio per far dialogare Render e Supabase
+    rejectUnauthorized: false 
   },
-  connectionTimeoutMillis: 10000 // Aspetta fino a 10 secondi prima di dare errore
+  // 2. MODIFICA: Diciamo esplicitamente al pooler a quale database puntare
+  options: '--project=rvsgbsnkurutsburxkwk',
+  connectionTimeoutMillis: 10000 
 });
 
 module.exports = {
