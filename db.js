@@ -1,16 +1,14 @@
 const { Pool } = require('pg');
 
 const pool = new Pool({
-  user: 'postgres.rvsgbsnkurutsburxkwk', // 1. MODIFICA: Aggiungiamo l'ID progetto all'utente
-  host: 'aws-0-eu-central-1.pooler.supabase.com',
+  user: 'postgres', // Torna l'utente semplice
+  host: 'db.rvsgbsnkurutsburxkwk.supabase.co', // Il tuo host originale
   database: 'postgres',
   password: 'Bracciano.2026', 
-  port: 6543, 
+  port: 5432, // Torniamo alla porta standard
   ssl: {
     rejectUnauthorized: false 
   },
-  // 2. MODIFICA: Diciamo esplicitamente al pooler a quale database puntare
-  options: '--project=rvsgbsnkurutsburxkwk',
   connectionTimeoutMillis: 10000 
 });
 
