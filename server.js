@@ -83,7 +83,7 @@ app.post('/api/pay', async (req, res) => {
   }
 });
 
-// 3. Endpoint di REGISTRAZIONE (Associa una nuova carta a un cliente)
+// 3. Endpoint di REGISTRAZIONE (Allineato al database di Tanos)
 app.post('/api/register-tag', async (req, res) => {
   const { uid, name, initial_balance } = req.body;
 
@@ -96,29 +96,33 @@ app.post('/api/register-tag', async (req, res) => {
   try {
     await client.query('BEGIN');
 
-    // Controlla se l'UID è già associato a una scheda attiva
-    const checkTag = await client.query("SELECT id FROM nfc_tags WHERE uid = $1 AND status = 'active'", [uid]);
+    // 1. Controlla se l'UID esiste già nella tabella nfc_tags
+    const checkTag = await client.query("SELECT uid FROM nfc_tags WHERE uid = $1", [uid]);
     if (checkTag.rows.length > 0) {
-      throw new Error("Questa tessera è già associata a un cliente attivo!");
+      throw new Error("Questa tessera è già registrata nel sistema!");
     }
 
-    // 1. Crea il cliente nella tabella 'customers'
+    // 2. Inserimento Cliente (Tabella customers)
     const customerName = name || "Ospite Ombrellone";
     const balanceValue = parseFloat(initial_balance) || 0.00;
 
     const customerInsert = await client.query(
-      "INSERT INTO customers (name, balance, is_active) VALUES ($1, $2, true) RETURNING id",
+      "INSERT INTO customers (name, balance) VALUES ($1, $2) RETURNING id",
       [customerName, balanceValue]
     );
+    
+    if (customerInsert.rows.length === 0) {
+      throw new Error("Errore durante la creazione del profilo cliente");
+    }
     const customerId = customerInsert.rows[0].id;
 
-    // 2. Associa l'UID della tessera al cliente appena creato nella tabella 'nfc_tags'
+    // 3. Inserimento Tag (Tabella nfc_tags - Specifichiamo 'status' per sicurezza)
     await client.query(
       "INSERT INTO nfc_tags (uid, customer_id, status) VALUES ($1, $2, 'active')",
       [uid, customerId]
     );
 
-    // 3. Se c'è un carico iniziale, registra la transazione come 'topup'
+    // 4. Registra lo storico nei movimenti se c'è un carico iniziale
     if (balanceValue > 0) {
       await client.query(
         "INSERT INTO transactions (customer_id, type, amount, description) VALUES ($1, 'topup', $2, 'Carico Iniziale Cassa')",
@@ -127,10 +131,11 @@ app.post('/api/register-tag', async (req, res) => {
     }
 
     await client.query('COMMIT');
-    res.json({ success: true, message: "Tessera attivata", customer_id: customerId });
+    res.json({ success: true, message: "Tessera attivata con successo", customer_id: customerId });
 
   } catch (error) {
     await client.query('ROLLBACK');
+    console.error("ERRORE BACKEND CASSA:", error.message);
     res.status(400).json({ success: false, error: error.message });
   } finally {
     client.release();
