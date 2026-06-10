@@ -150,6 +150,7 @@
         });
 
         // ENVIO DATI REGISTRAZIONE
+       // ENVIO DATI REGISTRAZIONE
         document.getElementById('registerForm').addEventListener('submit', async (e) => {
             e.preventDefault();
             const payload = {
@@ -166,19 +167,46 @@
                 });
                 const data = await response.json();
                 
-                if (data.success) {
+                if (response.ok && data.success) {
                     showToast(`Tessera attivata con successo per: ${payload.name || 'Ospite Anonimo'}`);
                     document.getElementById('registerForm').reset();
                     document.getElementById('regBalance').value = "0.00";
                     document.getElementById('regUid').focus();
                 } else {
-                    showToast(`Errore: ${data.error}`, false);
+                    showToast(`Errore: ${data.error || 'Problema di elaborazione'}`, false);
                 }
             } catch (err) {
                 showToast("Impossibile connettersi al server cloud.", false);
             }
         });
 
+        // ENVIO DATI RICARICA
+        document.getElementById('topupForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const payload = {
+                uid: document.getElementById('topupUid').value.trim(),
+                amount: document.getElementById('topupAmount').value
+            };
+
+            try {
+                const response = await fetch(`${API_URL}/topup`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                const data = await response.json();
+
+                if (response.ok && data.success) {
+                    showToast(`Ricarica eseguita! Nuovo Saldo: €${parseFloat(data.new_balance).toFixed(2)}`);
+                    document.getElementById('topupForm').reset();
+                    document.getElementById('topupUid').focus();
+                } else {
+                    showToast(`Errore: ${data.error || 'Problema di ricarica'}`, false);
+                }
+            } catch (err) {
+                showToast("Impossibile connettersi al server cloud.", false);
+            }
+        });
         // ENVIO DATI RICARICA
         document.getElementById('topupForm').addEventListener('submit', async (e) => {
             e.preventDefault();
