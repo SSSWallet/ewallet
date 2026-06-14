@@ -5,6 +5,9 @@ export default function CassaLido() {
   const [tab, setTab] = useState('reg');
   const [toast, setToast] = useState({ show: false, message: '', isSuccess: true });
   
+  // Nuovo stato per i Log degli eventi scritti in NERO
+  const [events, setEvents] = useState([]);
+  
   // Form Reg
   const [regUid, setRegUid] = useState('');
   const [regName, setRegName] = useState('');
@@ -15,12 +18,19 @@ export default function CassaLido() {
   const [topupAmount, setTopupAmount] = useState('');
 
   const regInputRef = useRef(null);
+  const nameInputRef = useRef(null); // Rif per spostare il focus sul nome
   const topupInputRef = useRef(null);
 
   useEffect(() => {
     if (tab === 'reg') regInputRef.current?.focus();
     if (tab === 'topup') topupInputRef.current?.focus();
   }, [tab]);
+
+  // Funzione per aggiungere eventi in tempo reale nel log nero
+  const addLogEvent = (message) => {
+    const time = new Date().toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    setEvents((prev) => [{ time, message }, ...prev]);
+  };
 
   const showToast = (message, isSuccess = true) => {
     setToast({ show: true, message, isSuccess });
@@ -29,22 +39,37 @@ export default function CassaLido() {
 
   const handleRegister = async (e) => {
     e.preventDefault();
+
+    // 🔥 GESTIONE BLOCCO: Se l'UID viene inserito (dal lettore) ma manca il nome, blocca tutto!
+    if (!regName.trim()) {
+      showToast("⚠️ Attenzione: Inserisci prima il Nome/Ombrellone!", false);
+      addLogEvent(`❌ Bloccato: Tentata attivazione UID (${regUid.trim()}) senza Nome Ospite.`);
+      nameInputRef.current?.focus(); // Sposta subito il cursore sul nome per aiutare l'operatore
+      return;
+    }
+
     try {
       const res = await fetch('/api/register-tag', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ uid: regUid.trim(), name: regName.trim(), initial_balance: regBalance })
+        // Allineato a initialBalance (camelCase) coerente con la tua API
+        body: JSON.stringify({ uid: regUid.trim(), name: regName.trim(), initialBalance: regBalance })
       });
       const data = await res.json();
       if (res.ok && data.success) {
-        showToast(`Tessera attivata con successo per: ${regName || 'Ospite Anonimo'}`);
+        const successMsg = `Tessera attivata per: ${regName.trim()} (Saldo: €${parseFloat(regBalance).toFixed(2)})`;
+        showToast(successMsg);
+        addLogEvent(`🎉 INIZIALIZZAZIONE: ${successMsg} - UID: ${regUid.trim()}`);
+        
         setRegUid(''); setRegName(''); setRegBalance('0.00');
         regInputRef.current?.focus();
       } else {
         showToast(`Errore: ${data.error}`, false);
+        addLogEvent(`❌ ERRORE DATABASE: ${data.error}`);
       }
     } catch {
       showToast("Errore di connessione con le Serverless Vercel.", false);
+      addLogEvent("❌ ERRORE RETE: Mancata connessione alle Serverless.");
     }
   };
 
@@ -58,20 +83,24 @@ export default function CassaLido() {
       });
       const data = await res.json();
       if (res.ok && data.success) {
-        showToast(`Ricarica eseguita! Nuovo Saldo: €${parseFloat(data.new_balance).toFixed(2)}`);
+        const successMsg = `Ricarica eseguita! Nuovo Saldo: €${parseFloat(data.new_balance).toFixed(2)}`;
+        showToast(successMsg);
+        addLogEvent(`💰 RICARICA: UID ${topupUid.trim()} caricato di +€${parseFloat(topupAmount).toFixed(2)}`);
+        
         setTopupUid(''); setTopupAmount('');
         topupInputRef.current?.focus();
       } else {
         showToast(`Errore: ${data.error}`, false);
+        addLogEvent(`❌ ERRORE RICARICA: ${data.error}`);
       }
     } catch {
       showToast("Errore di connessione con le Serverless Vercel.", false);
+      addLogEvent("❌ ERRORE RETE: Mancata connessione alle Serverless.");
     }
   };
 
   return (
     <div className="bg-slate-50 font-sans min-h-screen text-slate-800 antialiased">
-      {/* Script Tailwind per Next.js */}
       <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tailwindcss/ui@latest/dist/tailwind-ui.min.css"/>
       
       <nav className="bg-gradient-to-r from-blue-600 via-indigo-600 to-purple-700 text-white p-4 shadow-lg sticky top-0 z-40">
@@ -94,20 +123,20 @@ export default function CassaLido() {
           <section className="bg-white p-6 rounded-3xl shadow-xl border border-slate-100">
             <div className="mb-5">
               <h2 className="text-xl font-black text-slate-900">Inizializza Tessera</h2>
-              <p className="text-xs text-slate-400 mt-0.5">Assegna un codice UID vergine a un nuovo ospite.</p>
+              <p className="text-xs text-slate-500 mt-0.5 font-medium">Assegna un codice UID a un nuovo ospite.</p>
             </div>
             <form onSubmit={handleRegister} className="space-y-4">
               <div>
-                <label className="block text-xs font-bold text-slate-500 uppercase mb-1.5">1. UID Carta (Passa sul lettore)</label>
-                <input ref={regInputRef} type="text" required value={regUid} onChange={(e) => setRegUid(e.target.value)} placeholder="In attesa della lettura..." className="w-full p-3.5 bg-slate-50 border-2 border-slate-200 rounded-xl font-mono font-bold text-center tracking-widest outline-none border-blue-500"/>
+                <label className="block text-xs font-bold text-slate-600 uppercase mb-1.5">1. UID Carta (Passa sul lettore)</label>
+                <input ref={regInputRef} type="text" required value={regUid} onChange={(e) => setRegUid(e.target.value)} placeholder="In attesa della lettura..." className="w-full p-3.5 bg-slate-50 border-2 border-slate-200 rounded-xl font-mono font-bold text-center tracking-widest outline-none focus:border-blue-500 text-black"/>
               </div>
               <div>
-                <label className="block text-xs font-bold text-slate-500 uppercase mb-1.5">2. Nome Ospite / Ombrellone</label>
-                <input type="text" value={regName} onChange={(e) => setRegName(e.target.value)} placeholder="Es. Ombrellone 12" className="w-full p-3.5 bg-slate-50 border-2 border-slate-200 rounded-xl outline-none"/>
+                <label className="block text-xs font-bold text-slate-600 uppercase mb-1.5">2. Nome Ospite / Ombrellone</label>
+                <input ref={nameInputRef} type="text" value={regName} onChange={(e) => setRegName(e.target.value)} placeholder="Es. Ombrellone 12" className="w-full p-3.5 bg-slate-50 border-2 border-slate-200 rounded-xl outline-none focus:border-blue-500 font-bold text-black"/>
               </div>
               <div>
-                <label className="block text-xs font-bold text-slate-500 uppercase mb-1.5">3. Carico Denaro Iniziale (€)</label>
-                <input type="number" step="0.01" value={regBalance} onChange={(e) => setRegBalance(e.target.value)} className="w-full p-3.5 bg-slate-50 border-2 border-slate-200 rounded-xl font-black text-blue-600 text-lg text-center outline-none"/>
+                <label className="block text-xs font-bold text-slate-600 uppercase mb-1.5">3. Carico Denaro Iniziale (€)</label>
+                <input type="number" step="0.01" value={regBalance} onChange={(e) => setRegBalance(e.target.value)} className="w-full p-3.5 bg-slate-50 border-2 border-slate-200 rounded-xl font-black text-blue-600 text-lg text-center outline-none focus:border-blue-500"/>
               </div>
               <button type="submit" className="w-full bg-gradient-to-r from-blue-600 to-indigo-600 text-white font-bold p-4 rounded-xl text-sm uppercase tracking-wider mt-2 shadow-md">🚀 Attiva Tessera Vercel</button>
             </form>
@@ -116,21 +145,40 @@ export default function CassaLido() {
           <section className="bg-white p-6 rounded-3xl shadow-xl border border-slate-100">
             <div className="mb-5">
               <h2 className="text-xl font-black text-slate-900">Ricarica Rapida Cassa</h2>
-              <p className="text-xs text-slate-400 mt-0.5">Aggiungi credito digitale su una tessera esistente.</p>
+              <p className="text-xs text-slate-500 mt-0.5 font-medium">Aggiungi credito digitale su una tessera esistente.</p>
             </div>
             <form onSubmit={handleTopup} className="space-y-4">
               <div>
-                <label className="block text-xs font-bold text-slate-500 uppercase mb-1.5">UID Carta (Passa sul lettore)</label>
-                <input ref={topupInputRef} type="text" required value={topupUid} onChange={(e) => setTopupUid(e.target.value)} placeholder="In attesa della lettura..." className="w-full p-3.5 bg-slate-50 border-2 border-slate-200 rounded-xl font-mono font-bold text-center tracking-widest outline-none border-emerald-500"/>
+                <label className="block text-xs font-bold text-slate-600 uppercase mb-1.5">UID Carta (Passa sul lettore)</label>
+                <input ref={topupInputRef} type="text" required value={topupUid} onChange={(e) => setTopupUid(e.target.value)} placeholder="In attesa della lettura..." className="w-full p-3.5 bg-slate-50 border-2 border-slate-200 rounded-xl font-mono font-bold text-center tracking-widest outline-none focus:border-emerald-500 text-black"/>
               </div>
               <div>
-                <label className="block text-xs font-bold text-slate-500 uppercase mb-1.5">Importo Cash da Aggiungere (€)</label>
-                <input type="number" step="0.01" required value={topupAmount} onChange={(e) => setTopupAmount(e.target.value)} placeholder="0.00" className="w-full p-3.5 bg-slate-50 border-2 border-slate-200 rounded-xl font-black text-emerald-600 text-lg text-center outline-none"/>
+                <label className="block text-xs font-bold text-slate-600 uppercase mb-1.5">Importo Cash da Aggiungere (€)</label>
+                <input type="number" step="0.01" required value={topupAmount} onChange={(e) => setTopupAmount(e.target.value)} placeholder="0.00" className="w-full p-3.5 bg-slate-50 border-2 border-slate-200 rounded-xl font-black text-emerald-600 text-lg text-center outline-none focus:border-emerald-500"/>
               </div>
               <button type="submit" className="w-full bg-gradient-to-r from-emerald-500 to-teal-600 text-white font-bold p-4 rounded-xl text-sm uppercase tracking-wider mt-2 shadow-md">💰 Conferma ed Incassa</button>
             </form>
           </section>
         )}
+
+        {/* 📋 SEZIONE LOG EVENTI IN NERO INTENSO PER IL SOLE */}
+        <section className="mt-8 bg-white p-5 rounded-3xl shadow-lg border border-slate-200">
+          <h3 className="text-xs font-black text-black uppercase tracking-wider mb-3 flex items-center space-x-1.5">
+            <span>📋</span> <span>Registro Operazioni Cassa (Log Live)</span>
+          </h3>
+          <div className="bg-slate-50 rounded-2xl p-4 max-h-48 overflow-y-auto border border-slate-100 space-y-2.5">
+            {events.length === 0 ? (
+              <p className="text-xs text-black font-bold italic text-center py-2">Nessuna operazione registrata in questa sessione.</p>
+            ) : (
+              events.map((ev, i) => (
+                <div key={i} className="text-sm text-black font-extrabold border-b border-slate-200/60 pb-2 last:border-none flex items-start space-x-2">
+                  <span className="text-xs bg-slate-200 text-black px-1.5 py-0.5 rounded font-mono font-bold">{ev.time}</span>
+                  <span className="flex-1 leading-tight tracking-wide">{ev.message}</span>
+                </div>
+              ))
+            )}
+          </div>
+        </section>
       </main>
 
       {toast.show && (
