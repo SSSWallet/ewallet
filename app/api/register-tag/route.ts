@@ -1,61 +1,58 @@
+export const dynamic = 'force-dynamic';
+
 import { createClient } from '@supabase/supabase-js';
 import { NextResponse } from 'next/server';
 
-// Inizializzazione client Supabase tramite HTTPS API
+const SUPABASE_KEY = process.env.SUPABASE_ANON_KEY || "";
+
 const supabase = createClient(
   'https://rvsgbsnkurutsburxkwk.supabase.co',
-  process.env.SUPABASE_ANON_KEY
+  SUPABASE_KEY
 );
 
 export async function POST(request) {
   try {
-    const { uid, name, initial_balance } = await request.json();
+    const { uid, name, initialBalance } = await request.json();
+    const balanceNum = parseFloat(initialBalance) || 0.00;
 
-    if (!uid) {
-      return NextResponse.json({ success: false, error: "L'UID della carta è obbligatorio" }, { status: 400 });
+    if (!uid || !name) {
+      return NextResponse.json({ success: false, error: "UID e Nome Ombrellone sono obbligatori!" }, { status: 400 });
     }
 
-    // 1. Controlla se il tag esiste già
-    const { data: existingTag } = await supabase
-      .from('nfc_tags')
-      .select('uid')
-      .eq('uid', uid)
-      .maybeSingle();
-
-    if (existingTag) {
-      return NextResponse.json({ success: false, error: "Questa tessera è già registrata!" }, { status: 400 });
-    }
-
-    const customerName = name || "Ospite Ombrellone";
-    const balanceValue = parseFloat(parseFloat(initial_balance).toFixed(2)) || 0.00;
-
-    // 2. Inserisci il Cliente nella tabella customers
-    const { data: customer, error: customerError } = await supabase
+    // 1. Creiamo sempre il nuovo cliente
+    const { data: customer, error: custError } = await supabase
       .from('customers')
-      .insert([{ name: customerName, balance: balanceValue, is_active: true }])
-      .select('id')
+      .insert([{ name, balance: balanceNum }])
+      .select()
       .single();
 
-    if (customerError) throw new Error(`Errore creazione cliente: ${customerError.message}`);
-    const customerId = customer.id;
+    if (custError) throw custError;
 
-    // 3. Associa il tag NFC
+    // 2. Usiamo UPSERT: se l'UID esiste già, lo strappa al vecchio cliente e lo assegna a quello nuovo!
     const { error: tagError } = await supabase
       .from('nfc_tags')
-      .insert([{ uid: uid, customer_id: customerId, status: 'active' }]);
+      .upsert([{ uid, customer_id: customer.id, status: 'active' }], { onConflict: 'uid' });
 
-    if (tagError) throw new Error(`Errore associazione tag: ${tagError.message}`);
+    if (tagError) throw tagError;
 
-    // 4. Scrivi lo storico se c'è un saldo iniziale
-    if (balanceValue > 0) {
+    if (balanceNum > 0) {
       await supabase
         .from('transactions')
-        .insert([{ customer_id: customerId, type: 'topup', amount: balanceValue, description: 'Carico Iniziale Cassa' }]);
+        .insert([
+          { 
+            customer_id: customer.id, 
+            type: 'topup', 
+            amount: balanceNum, 
+            description: 'Credito caricato all\'attivazione' 
+          }
+        ]);
     }
 
-    return NextResponse.json({ success: true, message: "Tessera attivata con successo", customer_id: customerId });
+    return NextResponse.json({ success: true, customer });
 
   } catch (error) {
-    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+    console.error("❌ ERRORE DA SUPABASE:", error);
+    const msg = error?.message || (typeof error === 'string' ? error : JSON.stringify(error));
+    return NextResponse.json({ success: false, error: msg }, { status: 500 });
   }
 }
